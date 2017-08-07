@@ -36,6 +36,7 @@ class SearchCollectionList extends Reflux.Component {
     autoBind(this);
   }
   componentDidMount () {
+    this.searchDefault();
     this.listenTo(this.searchStore, this.searchChanged);
     this.queryCollections();
   }
@@ -45,7 +46,7 @@ class SearchCollectionList extends Reflux.Component {
       this.queryCollections();
   }
   queryCollections () {
-    if (this.props.searchContext.store.filterTags != 'asset_type:survey') {
+    if (this.props.searchContext.store.filterParams.assetType != 'asset_type:survey') {
       dataInterface.listCollections().then((collections)=>{
         this.setState({
           ownedCollections: collections.results.filter((value) => {
@@ -67,7 +68,7 @@ class SearchCollectionList extends Reflux.Component {
     }
   }
   handleScroll (event) {
-    if (this.props.searchContext.store.filterTags == 'asset_type:survey') {
+    if (this.props.searchContext.store.filterParams.assetType == 'asset_type:survey') {
       let offset = $(event.target).children('.asset-list').offset().top;
       this.setState({
         fixedHeadings: offset < -105 ? 'fixed-headings' : '',
@@ -188,7 +189,7 @@ class SearchCollectionList extends Reflux.Component {
   render () {
     var s = this.state;
     var docTitle = '';
-    if (this.props.searchContext.store.filterTags == 'asset_type:survey') {
+    if (this.props.searchContext.store.filterParams.assetType == 'asset_type:survey') {
       var display = 'grouped';
       docTitle = t('Projects');
     } else {

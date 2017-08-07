@@ -42,21 +42,12 @@ class FormSidebar extends Reflux.Component {
     ];
     autoBind(this);
   }
-  componentDidMount () {
-    this.searchDefault();
-  }
   componentWillMount() {
     this.setStates();
   }
   setStates() {
     this.setState({
-      headerFilters: 'forms',
-      searchContext: searches.getSearchContext('forms', {
-        filterParams: {
-          assetType: 'asset_type:survey',
-        },
-        filterTags: 'asset_type:survey',
-      })
+      headerFilters: 'forms'
     });
   }
   newFormModal (evt) {
@@ -99,7 +90,6 @@ FormSidebar.contextTypes = {
   router: PropTypes.object
 };
 
-reactMixin(FormSidebar.prototype, searches.common);
 reactMixin(FormSidebar.prototype, mixins.droppable);
 
 class DrawerLink extends React.Component {
@@ -198,7 +188,6 @@ class Drawer extends Reflux.Component {
   }
 };
 
-reactMixin(Drawer.prototype, searches.common);
 reactMixin(Drawer.prototype, mixins.droppable);
 reactMixin(Drawer.prototype, mixins.contextRouter);
 

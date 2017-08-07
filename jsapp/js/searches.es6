@@ -16,6 +16,8 @@ import assetParserUtils from './assetParserUtils';
 var searchDataInterface = (function(){
   return {
     assets: function(data) {
+      data.offset = 50;
+      data.limit = 50;
       return $.ajax({
         url: `${dataInterface.rootUrl}/assets/`,
         dataType: 'json',
