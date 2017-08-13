@@ -20,6 +20,53 @@ def get_instances_for_userform_id(userform_id, submission=None):
     return settings.MONGO_DB.instances.find(query)
 
 
+def build_formpack(asset):
+    # DOCUMENTATION!!! #NOCOMMIT
+    # Build a FormPack instance
+    _versions = asset.deployed_versions
+    schemas = []
+    for v in asset.deployed_versions:
+        try:
+            schemas.append(v.to_formpack_schema())
+        # FIXME: should FormPack validation errors have their own
+        # exception class?
+        except TypeError as e:
+            # https://github.com/kobotoolbox/kpi/issues/1361
+            logging.error(
+                'Failed to get formpack schema for version: %s'
+                    % repr(e),
+                 exc_info=True
+            )
+    pack = FormPack(versions=schemas, id_string=asset.uid)
+
+    # Now get the submissions stream
+    _userform_id = asset.deployment.mongo_userform_id
+    if not _userform_id.startswith(asset.owner.username):
+        raise Exception('asset has unexpected `mongo_userform_id`')
+    _version_id = schemas[0]['version'] # most recent version
+    _version_id_key = schemas[0].get('version_id_key', '__version__')
+    # Find the AssetVersion UID for each deprecated reversion ID
+    _reversion_ids = dict([
+        (str(v._reversion_version_id), v.uid)
+            for v in _versions if v._reversion_version_id
+    ])
+    def _inject_version_id(result):
+        if _version_id_key not in result:
+            # this submission does not specify a version; assume the latest one
+            result[_version_id_key] = _version_id
+        elif result[_version_id_key] in _reversion_ids:
+            # this submission has a deprecated reversion ID; replace it with
+            # the UID of the corresponding AssetVersion
+            result[_version_id_key] = _reversion_ids[result[_version_id_key]]
+        return result
+    submission_stream = get_instances_for_userform_id(_userform_id)
+    submission_stream = (
+        _inject_version_id(result) for result in submission_stream
+    )
+
+    return pack, submission_stream
+
+
 def _vnames(asset, cache=False):
     if not cache or not hasattr(asset, '_available_report_uids'):
         content = deepcopy(asset.content)

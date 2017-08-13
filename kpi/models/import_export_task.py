@@ -1,16 +1,26 @@
+# FIXME: clean up these imports!
 import base64
 from io import BytesIO
+import datetime
+import dateutil.parser
 import re
 import logging
+import posixpath
+import tempfile
 from os.path import splitext
 from collections import defaultdict
-from django.db import models
+from django.db import models, transaction
 from django.conf import settings
+from django.core.files.base import ContentFile
 from django.core.urlresolvers import get_script_prefix, resolve
 from django.utils.six.moves.urllib import parse as urlparse
 from jsonfield import JSONField
 import requests
 from pyxform import xls2json_backends
+from private_storage.fields import PrivateFileField
+from kobo.apps.reports.report_data import build_formpack
+from formpack import FormPack
+import formpack.constants
 from ..fields import KpiUidField
 from ..models import Collection, Asset
 from ..model_utils import create_assets, _load_library_content
@@ -33,6 +43,8 @@ def _resolve_url_to_asset_or_collection(item_path):
 
 
 class ImportExportTask(models.Model):
+    # DOCUMENTATION!!! #NOCOMMIT
+
     class Meta:
         abstract = True
 
@@ -56,6 +68,51 @@ class ImportExportTask(models.Model):
     date_created = models.DateTimeField(auto_now_add=True)
     # date_expired = models.DateTimeField(null=True)
 
+    def run(self):
+        # DOCUMENTATION!! #NOCOMMIT
+        '''
+        this could take a while.
+        '''
+
+        with transaction.atomic():
+            refetched_self = self._meta.model.objects.get(pk=self.pk)
+            self.status = refetched_self.status
+            del refetched_self
+            if self.status == self.COMPLETE:
+                return
+            elif self.status != self.CREATED:
+                # possibly a concurrent task?
+                raise Exception(
+                    'only recently created % can be executed'.format(
+                        self._meta.model_name)
+                )
+            self.status = self.PROCESSING
+            self.save(update_fields=['status'])
+
+        msgs = defaultdict(list)
+        try:
+            # This method must be implemented by a subclass
+            self._run_task(msgs)
+            self.status = self.COMPLETE
+        except Exception, err:
+            msgs['error_type'] = type(err).__name__
+            msgs['error'] = err.message
+            self.status = self.ERROR
+            logging.error(
+                'Failed to run %: %' % (self._meta.model_name, repr(err)),
+                exc_info=True
+            )
+
+        self.messages.update(msgs)
+        try:
+            self.save(update_fields=['status', 'messages'])
+        except TypeError, e:
+            self.status = ImportTask.ERROR
+            logging.error('Failed to save %: %' % (self._meta.model_name,
+                                                   repr(e)),
+                          exc_info=True)
+            self.save(update_fields=['status'])
+
 
 class ImportTask(ImportExportTask):
     uid = KpiUidField(uid_prefix='i')
@@ -64,69 +121,42 @@ class ImportTask(ImportExportTask):
     ...although we probably would need to store the file in a blob
     '''
 
-    def run(self):
-        '''
-        this could take a while.
-        '''
-        if self.status == self.COMPLETE:
-            return
+    def _run_task(self, messages):
+        self.status = self.PROCESSING
+        self.save(update_fields=['status'])
+        dest_item = dest_kls = has_necessary_perm = False
 
-        _status = self.status
-        msgs = defaultdict(list)
-        try:
-            if self.status != self.CREATED:
-                # possibly a concurrent import?
-                raise Exception('only recently created imports can be executed')
-            self.status = self.PROCESSING
-            self.save(update_fields=['status'])
-            dest_item = dest_kls = has_necessary_perm = False
-
-            if 'destination' in self.data and self.data['destination']:
-                _d = self.data.get('destination')
-                (dest_kls, dest_item) = _resolve_url_to_asset_or_collection(_d)
-                necessary_perm = 'change_%s' % dest_kls
-                if not dest_item.has_perm(self.user, necessary_perm):
-                    raise exceptions.PermissionDenied('user cannot update %s' % kls)
-                else:
-                    has_necessary_perm = True
-
-            if 'url' in self.data:
-                self._load_assets_from_url(
-                    messages=msgs,
-                    url=self.data.get('url'),
-                    destination=dest_item,
-                    destination_kls=dest_kls,
-                    has_necessary_perm=has_necessary_perm,
-                )
-            elif 'base64Encoded' in self.data:
-                self._parse_b64_upload(
-                    base64_encoded_upload=self.data['base64Encoded'],
-                    filename=self.data.get('filename', None),
-                    messages=msgs,
-                    library=self.data.get('library', False),
-                    destination=dest_item,
-                    destination_kls=dest_kls,
-                    has_necessary_perm=has_necessary_perm,
-                )
+        if 'destination' in self.data and self.data['destination']:
+            _d = self.data.get('destination')
+            (dest_kls, dest_item) = _resolve_url_to_asset_or_collection(_d)
+            necessary_perm = 'change_%s' % dest_kls
+            if not dest_item.has_perm(self.user, necessary_perm):
+                raise exceptions.PermissionDenied('user cannot update %s' % kls)
             else:
-                raise Exception(
-                    'ImportTask data must contain `base64Encoded` or `url`'
-                )
-            _status = self.COMPLETE
-        except Exception, err:
-            msgs['error_type'] = type(err).__name__
-            msgs['error'] = err.message
-            _status = self.ERROR
+                has_necessary_perm = True
 
-        self.status = _status
-        self.messages.update(msgs)
-        try:
-            self.save(update_fields=['status', 'messages'])
-        except TypeError, e:
-            self.status = ImportTask.ERROR
-            logging.error('Failed to save import: %s' % repr(e),
-                          exc_info=True)
-            self.save(update_fields=['status'])
+        if 'url' in self.data:
+            self._load_assets_from_url(
+                messages=messages,
+                url=self.data.get('url'),
+                destination=dest_item,
+                destination_kls=dest_kls,
+                has_necessary_perm=has_necessary_perm,
+            )
+        elif 'base64Encoded' in self.data:
+            self._parse_b64_upload(
+                base64_encoded_upload=self.data['base64Encoded'],
+                filename=self.data.get('filename', None),
+                messages=messages,
+                library=self.data.get('library', False),
+                destination=dest_item,
+                destination_kls=dest_kls,
+                has_necessary_perm=has_necessary_perm,
+            )
+        else:
+            raise Exception(
+                'ImportTask data must contain `base64Encoded` or `url`'
+            )
 
     def _load_assets_from_url(self, url, messages, **kwargs):
         destination = kwargs.get('destination', False)
@@ -253,9 +283,128 @@ def export_upload_to(self, filename):
 
 
 class ExportTask(ImportExportTask):
+    # DOCUMENTATION!!! #NOCOMMIT
+
     uid = KpiUidField(uid_prefix='e')
-    last_submission_timestamp = models.DateTimeField(null=True)
-    result = models.FileField(upload_to=export_upload_to, max_length=380)
+    last_submission_time = models.DateTimeField(null=True)
+    result = PrivateFileField(upload_to=export_upload_to, max_length=380)
+
+    COPY_FIELDS = ('_id', '_uuid', '_submission_time')
+    TIMESTAMP_KEY = '_submission_time'
+
+    @staticmethod
+    def build_export_filename(export, extension):
+        # DOCUMENTATION!!! #NOCOMMIT
+        form_type = 'labels'
+        if not export.lang:
+            form_type = "values"
+        elif export.lang != "_default":
+            form_type = export.lang
+
+        return "{title} - {form_type} - {date:%Y-%m-%d-%H-%M}.{ext}".format(
+            form_type=form_type,
+            date=datetime.datetime.utcnow(),
+            title=export.title,
+            ext=extension
+        )
+
+    def build_export_options(self, pack):
+        # DOCUMENTATION!!! #NOCOMMIT
+        hierarchy_in_labels = self.data.get(
+            'hierarchy_in_labels', ''
+        ).lower() == 'true'
+        group_sep = self.data.get('group_sep', '/')
+        translations = pack.available_translations
+        lang = self.data.get('lang', None) or next(iter(translations), None)
+        if lang == '_default':
+            lang = formpack.constants.UNTRANSLATED
+
+        return {
+            'versions': pack.versions, # inefficient?
+            'group_sep': group_sep,
+            'lang': lang,
+            'hierarchy_in_labels': hierarchy_in_labels,
+            'copy_fields': self.COPY_FIELDS,
+            'force_index': True,
+            'tag_cols_for_header': ['hxl'],
+        }
+
+    def _record_last_submission_time(self, submission_stream):
+        # DOCUMENTATION!!! #NOCOMMIT
+        # FIXME: Mongo has only per-second resolution. Brutal.
+        for submission in submission_stream:
+            try:
+                timestamp = submission[self.TIMESTAMP_KEY]
+            except KeyError:
+                pass
+            else:
+                timestamp = dateutil.parser.parse(timestamp)
+                if (
+                        self.last_submission_time is None or
+                        timestamp > self.last_submission_time
+                ):
+                    self.last_submission_time = timestamp
+            yield submission
+
+    def _run_task(self, messages):
+        # DOCUMENTATION!!! #NOCOMMIT
+        source_url = self.data.get('source', False)
+        if not source_url:
+            raise Exception('no source specified for the export')
+        source_type, source = _resolve_url_to_asset_or_collection(source_url)
+        if source_type != 'asset':
+            raise NotImplementedError(
+                'only an `Asset` may be exported at this time')
+        if not source.has_perm(self.user, 'view_submissions'):
+            # Unsure if DRF exceptions make sense here since we're not
+            # returning a HTTP response
+            raise exceptions.PermissionDenied(
+                'user cannot export this %s' % source._meta.model_name)
+        if not source.has_deployment:
+            raise Exception('the source must be deployed prior to export')
+        export_type = self.data.get('type', '').lower()
+        if export_type not in ('xls', 'csv'):
+            raise NotImplementedError(
+                'only `xls` and `csv` are valid export types')
+
+        pack, submission_stream = build_formpack(source)
+        # Wrap the submission stream in a generator that records the most
+        # recent timestamp
+        submission_stream = self._record_last_submission_time(
+            submission_stream)
+        options = self.build_export_options(pack)
+        export = pack.export(**options)
+        extension = 'xlsx' if export_type == 'xls' else export_type
+        filename = self.build_export_filename(export, extension)
+        self.result.save(filename, ContentFile(''))
+        # FileField files are opened read-only by default and must be
+        # closed and reopened to allow writing
+        # https://code.djangoproject.com/ticket/13809
+        self.result.close()
+        self.result.file.close()
+        self.result.open('wb')
+
+        if export_type == 'csv':
+            for line in export.to_csv(submission_stream):
+                self.result.write(line + "\r\n")
+        elif export_type == 'xls':
+            # XLSX export actually requires a filename (limitation of
+            # pyexcelerate?)
+            with tempfile.NamedTemporaryFile(
+                    prefix='export_xlsx', mode='rb'
+            ) as xlsx_output_file:
+                export.to_xlsx(xlsx_output_file.name, submission_stream)
+                while True:
+                    chunk = xlsx_output_file.read(8192)
+                    if chunk:
+                        self.result.write(chunk)
+                    else:
+                        break
+
+        # Restore the FileField to its typical state
+        self.result.close()
+        self.result.open('rb')
+        self.save(update_fields=['last_submission_time'])
 
 
 def _b64_xls_to_dict(base64_encoded_upload):

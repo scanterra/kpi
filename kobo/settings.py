@@ -74,6 +74,7 @@ INSTALLED_APPS = (
     'debug_toolbar',
     'mptt',
     'haystack',
+    'private_storage',
     'kobo.apps.KpiConfig',
     'hub',
     'loginas',
@@ -182,6 +183,10 @@ USE_TZ = True
 
 CAN_LOGIN_AS = lambda request, target_user: request.user.is_superuser
 
+# Private media file configuration
+PRIVATE_STORAGE_ROOT = os.path.join(BASE_DIR, 'media')
+PRIVATE_STORAGE_AUTH_FUNCTION = \
+    'kpi.utils.private_storage.superuser_or_username_matches_prefix'
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/1.7/howto/static-files/
@@ -414,6 +419,10 @@ if 'KPI_DEFAULT_FILE_STORAGE' in os.environ:
     if 'KPI_AWS_STORAGE_BUCKET_NAME' in os.environ:
         AWS_STORAGE_BUCKET_NAME = os.environ.get('KPI_AWS_STORAGE_BUCKET_NAME')
         AWS_DEFAULT_ACL = 'private'
+        # django-private-storage needs its own S3 configuration
+        PRIVATE_STORAGE_CLASS = \
+            'private_storage.storage.s3boto3.PrivateS3BotoStorage'
+        AWS_PRIVATE_STORAGE_BUCKET_NAME = AWS_STORAGE_BUCKET_NAME
 
 ''' Sentry configuration '''
 if 'RAVEN_DSN' in os.environ:
