@@ -504,6 +504,10 @@ mixins.contextRouter = {
   isFormSingle () {
     return this.context.router.isActive('forms') && this.context.router.params.assetid != undefined;
   },
+  isFormDataSubscreen () {
+    if (this.context.router.params.assetid != undefined)
+      return this.context.router.isActive(`forms/${this.context.router.params.assetid}/data`);
+  },
   currentAssetID () {
     return this.context.router.params.assetid;
   },

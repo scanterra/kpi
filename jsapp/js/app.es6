@@ -105,6 +105,7 @@ class App extends React.Component {
               'fixed-drawer': this.state.pageState.showFixedDrawer,
               'header-hidden': (this.isFormBuilder() || this.state.pageState.headerHidden),
               'drawer-hidden': (this.isFormBuilder() || this.state.pageState.drawerHidden),
+              'drawer-minified': this.isFormDataSubscreen()
                 }} className="mdl-layout mdl-layout--fixed-header">
               { this.state.pageState.modal &&
                 <Modal params={this.state.pageState.modal} />

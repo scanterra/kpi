@@ -8,10 +8,12 @@
   left: 0px;
   display: flex;
   flex-direction: row;
+  transition: width 0.3s;
 }
 
 .mdl-layout__content {
   margin-left: 270px;
+  transition: margin-left 0.3s;
 }
 
 .k-drawer__icons {
@@ -20,6 +22,7 @@
   width: 58px;
   height: 100%;
   border-right: 1px solid #D9DADD;
+  flex-shrink: 0;
 }
 
 .k-drawer__link {
@@ -28,9 +31,11 @@
   color: lighten($black, 40%);
   padding: 0px;
   border-left: 3px solid transparent;
+
   &:first-child {
     margin-top: 20px;
   }
+
   &.active {
     color: $cool-green;
     border-left: 3px solid $cool-green;
@@ -42,6 +47,7 @@
   bottom: 0px;
   position: absolute;
   width: 58px;
+
   .k-drawer__link {
     padding: 0px;
     margin-bottom: 5px;
@@ -50,9 +56,11 @@
     font-weight: normal;
     position: relative;
     color: lighten($black, 40%);
+
     &:hover {
       color: $cool-blue;
     }
+
     i {
       font-size: 38px;
     }
@@ -63,11 +71,26 @@
   width: calc(100% - 58px);
   height: 100%;
   padding: 20px 14px;
+
   .k-drawer__close {
     display: none;
   }
+
   .form-sidebar__wrapper, .collections-wrapper {
     height: 100%;
+  }
+}
+
+@media screen and (min-width: 769px) {
+  .page-wrapper--drawer-minified {
+    .k-drawer:not(:hover) {
+      width: 70px;
+      overflow: hidden;
+    }
+
+    .k-drawer:not(:hover) + .mdl-layout__content {
+      margin-left: 70px;
+    }
   }
 }
 
@@ -76,17 +99,21 @@
     position: fixed;
     z-index: 4;
     left: -274px;
-    transition: left 0.5s;
+    transition: left 0.3s;
     background-color: #FFF;
+
     @include box-shadow;
   }
+
   .page-wrapper--fixed-drawer .k-drawer {
     left: 0px;
     width: 340px;
   }
+
   .mdl-layout__content {
     margin-left: 0px;
   }
+
   .drawer__sidebar {
     .k-drawer__close {
       font-size: 16px;
@@ -96,6 +123,7 @@
       top: 8px;
       display: block;
       color: $layout-drawer-nav-link-color;
+
       &:hover {
         background-color: transparent;
         opacity: 0.6;
