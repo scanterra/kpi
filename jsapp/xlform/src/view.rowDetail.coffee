@@ -4,6 +4,8 @@ $modelUtils = require './model.utils'
 $configs = require './model.configs'
 $viewUtils = require './view.utils'
 $icons = require './view.icons'
+$hxl = require './view.rowDetail.hxlDict'
+
 $viewRowDetailSkipLogic = require './view.rowDetail.SkipLogic'
 $viewTemplates = require './view.templates'
 _t = require('utils').t
@@ -59,6 +61,7 @@ module.exports = do ->
       # to the element are reflected in the model (with transformFn
       # applied)
       el = opts.el || @$('input').get(0)
+      
       $el = $(el)
       transformFn = opts.transformFn || false
       inputType = opts.inputType
@@ -117,6 +120,14 @@ module.exports = do ->
       select += "</select>"
 
       @field select, cid, key_label
+
+    hxlTags: (cid, key, key_label = key, value = '', hxlTag = '', hxlAttrs = '') ->
+      tags = """<input type="text" name="#{key}" id="#{cid}" class="hxlValue hidden" value="#{value}"  />"""
+      tags += """ <div class="settings__hxl"><input id="#{cid}-tag" class="hxlTag" value="#{hxlTag}" type="hidden" />"""
+      tags += """ <input id="#{cid}-attrs" class="hxlAttrs" value="#{hxlAttrs}" type="hidden" /></div>"""
+
+      @field tags, cid, key_label
+
     field: (input, cid, key_label) ->
       """
       <div class="card__settings__fields__field">
@@ -229,6 +240,83 @@ module.exports = do ->
   # insertInDom: (rowView)->
     #   # default behavior...
     #   rowView.defaultRowDetailParent.append(@el)
+
+  viewRowDetail.DetailViewMixins.tags =
+    html: ->
+      @fieldTab = "active"
+      @$el.addClass("card__settings__fields--#{@fieldTab}")
+      label = _t("HXL")
+      if (@model.get("value"))
+        tags = @model.get("value")
+        hxlTag = ''
+        hxlAttrs = []
+        hxlAttrsString = ''
+
+        if _.isArray(tags)
+          _.map(tags, (_t, i)->
+            if (_t.indexOf('hxl:') > -1)
+              _t = _t.replace('hxl:','')
+              if (_t.indexOf('#') > -1)
+                hxlTag = _t
+              if (_t.indexOf('+') > -1)
+                _t = _t.replace('+','')
+                hxlAttrs.push(_t)
+          )
+
+        if _.isArray(hxlAttrs)
+          hxlAttrsString = hxlAttrs.join(',')
+
+        viewRowDetail.Templates.hxlTags @cid, @model.key, label, @model.get("value"), hxlTag, hxlAttrsString
+      else
+        viewRowDetail.Templates.hxlTags @cid, @model.key, label
+    afterRender: ->
+      @$el.find('input.hxlTag').select2({
+          tags:$hxl.dict,
+          maximumSelectionSize: 1,
+          placeholder: _t('#tag'),
+          tokenSeparators: ['+',',', ':'],
+          formatSelectionTooBig: _t('Only one HXL tag allowed per question. ')
+        })
+      @$el.find('input.hxlAttrs').select2({
+          tags:[],
+          tokenSeparators: ['+',',', ':'],
+          formatNoMatches: _t('Type attributes for this tag'),
+          placeholder: _t('Attributes'),
+          allowClear: 1
+        })
+
+      @$el.find('input.hxlTag').on 'change', () => @_hxlUpdate()
+      @$el.find('input.hxlAttrs').on 'change', () => @_hxlUpdate()
+
+      @$el.find('.hxlTag input.select2-input').on 'keyup', () => @_hxlTagSanitize()
+
+      @listenForInputChange({el: @$el.find('input.hxlValue').eq(0)})
+
+    _hxlUpdate: (e)->
+      tag = @$el.find('input.hxlTag').val()
+
+      attrs = @$el.find('input.hxlAttrs').val()
+      attrs = attrs.replace(/,/g, '+')
+      hxlArray = [];
+
+      if (tag)
+        @$el.find('input.hxlAttrs').select2('enable', true)
+        hxlArray.push('hxl:' + tag)
+        if (attrs)
+          aA = attrs.split('+')
+          _.map(aA, (_a)->
+            hxlArray.push('hxl:+' + _a)
+          )
+      else
+        @$el.find('input.hxlAttrs').select2('enable', false)
+
+      @model.set('value', hxlArray)
+      @model.trigger('change')
+
+    _hxlTagSanitize: ()-> 
+      tag = @$el.find('.hxlTag input.select2-input').val()
+      if (tag && !tag.startsWith("#"))
+        @$el.find('.hxlTag input.select2-input').val("#" + tag)
 
   viewRowDetail.DetailViewMixins.default =
     html: ->
