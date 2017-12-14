@@ -1,4 +1,4 @@
-FROM kobotoolbox/koboform_base:latest
+FROM scanterra/koboform_base:latest
 
 
 # Note: Additional environment variables have been set in `Dockerfile.koboform_base`.
